@@ -1,0 +1,138 @@
+
+/**
+ * The Hack CPU (Central Processing unit), consisting of an ALU,
+ * two registers named A and D, and a program counter named PC.
+ * The CPU is designed to fetch and execute instructions written in 
+ * the Hack machine language. In particular, functions as follows:
+ * Executes the inputted instruction according to the Hack machine 
+ * language specification. The D and A in the language specification
+ * refer to CPU-resident registers, while M refers to the external
+ * memory location addressed by A, i.e. to Memory[A]. The inM input 
+ * holds the value of this location. If the current instruction needs 
+ * to write a value to M, the value is placed in outM, the address 
+ * of the target location is placed in the addressM output, and the 
+ * writeM control bit is asserted. (When writeM==0, any value may 
+ * appear in outM). The outM and writeM outputs are combinational: 
+ * they are affected instantaneously by the execution of the current 
+ * instruction. The addressM and pc outputs are clocked: although they 
+ * are affected by the execution of the current instruction, they commit 
+ * to their new values only in the next time step. If reset==1 then the 
+ * CPU jumps to address 0 (i.e. pc is set to 0 in next time step) rather 
+ * than to the address resulting from executing the current instruction. 
+ */
+
+CHIP CPU {
+
+    IN  inM[16],         // M value input  (M = contents of RAM[A])
+        instruction[16], // Instruction for execution
+        reset;           // Signals whether to re-start the current
+                         // program (reset==1) or continue executing
+                         // the current program (reset==0).
+
+    OUT outM[16],        // M value output
+        writeM,          // Write to M? 
+        addressM[15],    // Address in data memory (of M)
+        pc[15];          // address of next instruction
+
+    PARTS:
+
+
+    // Parse Instruction
+    // ===================
+
+    // C Type - instruction[15]
+    Or(a=instruction[15], out=ctype);
+
+    // A Type - reverse C-Type
+    Not(in=ctype, out=atype);
+
+    // A Bit in C-Instruction 
+    And(a=ctype, b=instruction[12], out=abit);
+
+    // JUMP
+    And(a=ctype, b=instruction[0], out=jmp0);
+    And(a=ctype, b=instruction[1], out=jmp1);
+    And(a=ctype, b=instruction[2], out=jmp2);
+
+    // Destinations:
+    And(a=ctype, b=instruction[3], out=storeM);
+    And(a=ctype, b=instruction[4], out=storeD);
+    And(a=ctype, b=instruction[5], out=storeAinC);
+    Or(a=atype,  b=storeAinC,      out=storeA);
+
+    // Compute
+    Or(b=instruction[11], out=comp1);
+    Or(b=instruction[10], out=comp2);
+    Or(b=instruction[9],  out=comp3);
+    Or(b=instruction[8],  out=comp4);
+    Or(b=instruction[7],  out=comp5);
+    Or(b=instruction[6],  out=comp6);
+
+
+    // New Instruction or ALU output
+    // ===================
+    Mux16(a=instruction, b=aluout, sel=ctype, out=inst0);
+
+
+    // A Register
+    // ===================
+    ARegister(in=inst0, load=storeA, out=ARegOut, out[0..14]=addressM);
+    
+
+    // D Register
+    // ===================
+    DRegister(in=aluout, load=storeD, out=DRegOut);
+
+
+    // Mux - instruction or input based on a bit
+    // ===================
+    Mux16(a=ARegOut, b=inM, sel=abit, out=aluY);
+
+
+    // ALU
+    // ===================
+
+    ALU(
+        x=DRegOut,
+        y=aluY,
+        zx=comp1,         // zero the x input?
+        nx=comp2,         // negate the x input?
+        zy=comp3,         // zero the y input?
+        ny=comp4,         // negate the y input?
+        f= comp5,         // compute out = x + y (if 1) or x & y (if 0)
+        no=comp6,         // negate the out output?
+
+        out=aluout, out=outM,
+        zr=aluoutzero, ng=aluoutng);
+
+    // write to M
+    // ===================
+    Or(a=storeM, out=writeM);
+
+
+    // Program Counter
+    // ===================
+
+    // generate positive condition
+    Not(in=aluoutng, out=nefalse);
+    Not(in=aluoutzero, out=zerofalse);
+    And(a=nefalse, b=zerofalse, out=positive);
+
+    // compare condition with ALU output
+    And(a=jmp2, b=aluoutng,   out=cond1);
+    And(a=jmp1, b=aluoutzero, out=cond2);
+    And(a=jmp0, b=positive,   out=cond3);
+
+    // should load A if one of conditions is met:
+    Or(a=cond1, b=cond2, out=w1);
+    Or(a=w1, b=cond3, out=shouldLoad);
+
+    // should increment if not reset nor condition:
+    Or(a=shouldLoad, b=reset, out=w2);
+    Not(in=w2, out=shouldInc);
+
+    PC(in=ARegOut, load=shouldLoad, inc=shouldInc, reset=reset, out[0..14]=pc);
+
+
+
+}
