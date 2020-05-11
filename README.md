@@ -1,1 +1,1 @@
-# von-neumann-16-bit-arch
+# Von Neumann 16-bit architecture
